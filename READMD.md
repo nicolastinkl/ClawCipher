@@ -33,33 +33,98 @@ OpenClaw enables autonomous AI agents but operates under **compromised trust ass
 
 ---
 
+## 1.4 v0.1 Scope & Acceptance Charter (Normative)
+
+### 1.4.1 What v0.1 *is*
+v0.1 is an **engineerable** subset of the full ClawCipher thesis, optimized for:
+- A drop-in compatibility surface for OpenClaw-style agent runtimes
+- A working privacy transport that can be measured and regression-tested
+- A *policy-enforced* Skills execution model that is safe-by-default
+- ZK attestation only where it is tractable and testable (canonical Skills)
+
+### 1.4.2 What v0.1 is *not*
+The following are explicitly out-of-scope for v0.1 and moved to v1.0+:
+- Full multi-hop onion routing with global passive adversary guarantees
+- A decentralized marketplace (IPFS registry + L2 contracts + staking/slashing)
+- ERC-4337 agent wallets, ZK payment channels, and cross-agent hiring
+- A full ClawOS distribution (Live USB / hardened OS supply chain)
+- "Hidden volumes" plausible deniability storage and TPM/secure-boot hard requirements
+
+### 1.4.3 Threat model (v0.1)
+v0.1 is designed to resist:
+- **Passive local network adversary** (ISP, corporate proxy, hostile WiFi): observes client egress but does not control endpoint devices
+- **Active local network adversary** (MITM attempts): can inject/drop packets but cannot break modern AEAD or signatures
+- **Malicious Skill authors**: attempt exfiltration via filesystem/network/process APIs
+
+v0.1 does **not** claim resistance to:
+- **Global passive adversary** with ubiquitous visibility and long-term correlation
+- **Endpoint compromise** (kernel-level malware, physical probing attacks beyond reasonable consumer defenses)
+
+### 1.4.4 Privacy modes (v0.1)
+All agents MUST support the following modes:
+- **off**: direct outbound networking allowed; Skills policy still enforced
+- **standard** (default): single-hop privacy tunnel, size padding (bucketed), timing jitter (bounded); no cover traffic
+- **high**: standard + cover traffic enabled + stricter padding + reduced metadata surface (more aggressive normalization)
+
+### 1.4.5 Canonical Skills set (v0.1)
+v0.1 defines exactly five canonical Skills that MUST be supported:
+- `email`
+- `calendar`
+- `file_ops`
+- `web_search`
+- `api_call`
+
+Only canonical Skills are REQUIRED to provide ZK attestation in v0.1.
+
+### 1.4.6 Compatibility definition (v0.1)
+"Drop-in replacement for `openclaw-core`" means:
+- Agent initialization APIs remain compatible at the type and behavioral levels
+- LLM call semantics (request/response shape, streaming behavior if present) remain compatible
+- Skills invocation semantics remain compatible
+
+### 1.4.7 Acceptance tests (v0.1)
+An implementation is considered v0.1-compliant only if it passes:
+- **A1 (Tunnel enforcement)**: with direct egress blocked, the agent can still complete an LLM request via the tunnel
+- **A2 (Destination concealment)**: a passive local observer cannot directly observe the true destination domain of LLM calls
+- **A3 (Latency budget)**: in `standard`, p95 end-to-end latency ≤ 1.5× baseline direct call for a fixed prompt; in `high`, p95 ≤ 3× baseline
+- **A4 (Policy hard-fail)**: Skills attempting undeclared filesystem or network access MUST fail with a deterministic policy error
+- **A5 (No spawn by default)**: Skills attempting process spawning/system calls MUST fail
+- **A6 (Canonical ZK gate)**: canonical Skills without valid proof MUST not execute (cryptographic failure, not warning)
+- **A7 (ZK verify budget)**: canonical proof verification p95 < 5 seconds on consumer hardware (M1-class)
+- **A8 (Ephemeral mode)**: no sensitive plaintext is written to disk during a standard task run in ephemeral mode
+
 ## 2. Requirements Specification
 
 ### 2.1 Functional Requirements (FR)
 
 #### FR-1: Zero-Knowledge Skills Verification (ZK-Skill)
 **Priority**: P0 (Critical)  
-**Description**: All third-party Skills must provide cryptographic proof of safety before execution.
+**Description**: v0.1 restricts mandatory ZK attestation to canonical Skills. For all other Skills, hard policy enforcement is required regardless of proof presence.
 - **FR-1.1**: Skills developers must generate zk-SNARK proofs attesting that code:
   - Does not access filesystem paths outside declared manifest
   - Does not initiate network connections to non-whitelisted domains
   - Does not execute shell commands or system calls
-- **FR-1.2**: Verification must complete in <5 seconds on consumer hardware (M1 MacBook Pro or equivalent)
-- **FR-1.3**: Rejected Skills must fail with cryptographic error, not heuristic warning
+- **FR-1.2 (v0.1)**: For canonical Skills, proof verification must complete in <5 seconds on consumer hardware (M1 MacBook Pro or equivalent)
+- **FR-1.3 (v0.1)**: Canonical Skills rejected by verification must fail with a cryptographic error, not heuristic warning
+- **FR-1.4 (v0.1)**: Non-canonical Skills MUST be sandboxed by policy enforcement even if proofs are not required
 
 #### FR-2: Onion-Routed Agent Communication (ClawTunnel)
 **Priority**: P0  
-**Description**: All LLM API calls must traverse anonymized routing layers.
-- **FR-2.1**: Implement triple-layer onion routing (Entry → Relay → Exit) with <800ms latency budget
-- **FR-2.2**: Cover traffic generation: Agent must emit synthetic decoy requests when idle (min 10 req/hour baseline noise)
-- **FR-2.3**: Protocol-level resistance to traffic analysis (packet size normalization, timing obfuscation)
+**Description**: v0.1 mandates tunnel enforcement with measurable privacy properties; multi-hop onion routing is a v1.0+ goal.
+- **FR-2.1 (v0.1)**: Implement single-hop privacy tunnel mode (Client → Entry) for all LLM API calls
+- **FR-2.2 (v0.1)**: Support bucketed packet/request size normalization and bounded timing jitter
+- **FR-2.3 (v0.1)**: Provide `privacyMode` toggles: `off`, `standard`, `high`
+- **FR-2.4 (v1.0+)**: Implement triple-layer onion routing (Entry → Relay → Exit)
+- **FR-2.5 (v1.0+)**: Cover traffic baseline noise in high-security mode (e.g., ≥10 req/hour) and stronger traffic analysis resistance
 
 #### FR-3: Anti-Forensic Execution (ClawOS)
 **Priority**: P0  
-**Description**: Physical device compromise must not reveal historical agent operations.
-- **FR-3.1**: Volatile-only execution: All sensitive intermediate states (API keys, retrieved data, conversation history) must reside exclusively in RAM with automatic shred (overwrite) every 60 seconds
-- **FR-3.2**: Plausible deniability storage: Persistent storage (if enabled) must use hidden volume encryption (VeraCrypt-style) with secondary duress password revealing benign decoy data
-- **FR-3.3**: Secure boot chain: Trusted boot using TPM 2.0 or Libreboot with measured boot attestation
+**Description**: v0.1 focuses on eliminating accidental persistence and minimizing secret lifetime; full anti-forensic OS hardening is v1.0+.
+- **FR-3.1 (v0.1)**: Ephemeral mode: no sensitive intermediate states (API keys, retrieved data, conversation history) may be written to disk by default
+- **FR-3.2 (v0.1)**: Disable/avoid crash artifacts and persistence surfaces where possible (core dumps, verbose logs, unencrypted caches)
+- **FR-3.3 (v1.0+)**: Volatile-only execution with systematic key shredding and hardened OS runtime
+- **FR-3.4 (v1.0+)**: Plausible deniability storage (hidden volumes) for optional persistence
+- **FR-3.5 (v1.0+)**: Secure boot chain with TPM/Libreboot measured boot attestation
 
 #### FR-4: Decentralized Skills Marketplace (ClawBazaar)
 **Priority**: P1 (High)  
